@@ -1,0 +1,10 @@
+# Claude Code local settings
+.claude/settings.local.json
+
+# Generated sample output of manual_prayer_times.py (regenerate as needed)
+manual_prayer_times.h
+
+# Arduino build artifacts
+build/
+*.hex
+*.elf
