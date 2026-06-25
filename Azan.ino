@@ -10,14 +10,14 @@
 #define I2C_FREQ 100000  // 100kHz for better compatibility
 #define BTN_MODE 10
 #define BTN_SECTION 11  // اختيار ما نعدّل
-#define BTN_UP 12      // زيادة
+#define BTN_UP 12       // زيادة
 #define BTN_DOWN 13     // نقصان
 #define RELAY_PIN 3
-#define MANUAL_SWITCH_PIN 14  // مفتاح تشغيل يدوي
+#define MANUAL_SWITCH_PIN 14  // مفتاح تشغيل يدوي — INPUT_PULLUP، LOW = تشغيل
 
-int settingMode = 0;  // 0 = عرض عادي، 1 = ضبط ساعة، 2 = ضبط دقيقة، 3 = ضبط يوم، 4 = ضبط شهر
+int settingMode = 0;  // 0 = عرض عادي، 1-6 = وضع الضبط
 DateTime now;
-LiquidCrystal lcd(8 , 9 , 4 , 5 , 6 , 7);
+LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
 RTC_DS3231 rtc;
 
 // Button state tracking for edge-detected debouncing
@@ -27,12 +27,10 @@ int lastUpState = HIGH;
 int lastDownState = HIGH;
 unsigned long lastButtonEventMs = 0;
 const unsigned long debounceMs = 120;
-bool manualMode = false; // وضع تشغيل يدوي عبر المفتاح
+bool manualMode = false;
 
-// أسماء الصلوات حسب الترتيب
 const char* PRAYER_NAMES[5] = { "Fajr", "Dhuhr", "Asr", "Maghrib", "Isha" };
 
-// إرجاع أوقات اليوم الحالي من ملف prayer_times.h
 const PrayerTime* getPrayerTimesForDate(uint8_t day, uint8_t month) {
   for (int i = 0; i < 365; i++) {
     if (prayer_times[i].day == day && prayer_times[i].month == month) {
@@ -42,14 +40,12 @@ const PrayerTime* getPrayerTimesForDate(uint8_t day, uint8_t month) {
   return NULL;
 }
 
-// Forward declarations for global Azan length used in EEPROM helpers
 extern int azanLenMinutes;
 extern int azanLenSeconds;
 
-// EEPROM addresses
-const int EEPROM_FLAG_ADDR = 0;  // 1 = initialized
-const int EEPROM_MIN_ADDR = 1;   // minutes (0-59)
-const int EEPROM_SEC_ADDR = 2;   // seconds (0-59)
+const int EEPROM_FLAG_ADDR = 0;
+const int EEPROM_MIN_ADDR = 1;
+const int EEPROM_SEC_ADDR = 2;
 
 void loadAzanLenFromEEPROM() {
   uint8_t flag = EEPROM.read(EEPROM_FLAG_ADDR);
@@ -88,18 +84,16 @@ void saveAzanLenToEEPROM() {
   Serial.println(azanLenSeconds);
 }
 
-// متغيرات للتحكم بالآذان
 bool azanActive = false;
 unsigned long azanStartTime = 0;
-int azanLenMinutes = 5;  // القيمة الابتدائية: 5 دقائق
-int azanLenSeconds = 0;  // القيمة الابتدائية: 0 ثوانٍ
+int azanLenMinutes = 5;
+int azanLenSeconds = 0;
 
 unsigned long getAzanDurationMs() {
   return (unsigned long)azanLenMinutes * 60000UL + (unsigned long)azanLenSeconds * 1000UL;
 }
-String currentAzanName = ""; // حفظ اسم الآذان الحالي
+String currentAzanName = "";
 
-// Function to scan I2C devices
 void scanI2C() {
   Serial.println("Scanning I2C devices...");
   lcd.clear();
@@ -109,12 +103,9 @@ void scanI2C() {
   for (byte address = 1; address < 127; address++) {
     Wire.beginTransmission(address);
     byte error = Wire.endTransmission();
-
     if (error == 0) {
       Serial.print("I2C device found at address 0x");
-      if (address < 16) {
-        Serial.print("0");
-      }
+      if (address < 16) Serial.print("0");
       Serial.println(address, HEX);
       nDevices++;
     }
@@ -145,25 +136,23 @@ void setup() {
   pinMode(BTN_UP, INPUT_PULLUP);
   pinMode(BTN_DOWN, INPUT_PULLUP);
   pinMode(RELAY_PIN, OUTPUT);
-  pinMode(MANUAL_SWITCH_PIN, INPUT); // يتوقع 0V أو 5V من المفتاح
-  digitalWrite(RELAY_PIN, HIGH); // إيقاف الريليه عند البداية 
-  // Configure I2C with proper settings
+  // Manual switch: INPUT_PULLUP — connect switch between pin 14 and GND; LOW = manual ON
+  pinMode(MANUAL_SWITCH_PIN, INPUT_PULLUP);
+  digitalWrite(RELAY_PIN, HIGH);  // relay off at startup
+
   Wire.begin();
   Wire.setClock(I2C_FREQ);
-  Wire.setTimeout(1000);  // 1 second timeout
+  Wire.setTimeout(1000);
 
   lcd.begin(16, 2);
 
   Serial.println("Starting Azan System...");
-  // Load persisted Azan length from EEPROM (or initialize defaults)
   loadAzanLenFromEEPROM();
   lcd.print("Starting...");
   delay(1000);
 
-  // Scan for I2C devices first
   scanI2C();
 
-  // Try to initialize RTC with retry mechanism
   int rtcAttempts = 0;
   bool rtcFound = false;
 
@@ -185,7 +174,6 @@ void setup() {
       lcd.clear();
       lcd.print("RTC Connected!");
 
-      // Check if RTC lost power and set time if needed
       if (rtc.lostPower()) {
         Serial.println("RTC lost power, setting time...");
         rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
@@ -214,18 +202,11 @@ void setup() {
     lcd.print("RTC Failed!");
     lcd.setCursor(0, 1);
     lcd.print("Check Wiring!");
-    while (1) {
-      delay(1000);
-    }
+    while (1) delay(1000);
   }
 
   Serial.println("System Ready!");
-  Serial.println("Initial SettingMode: " + String(settingMode));
-  
-  // تأكد من أن النظام يبدأ بالعرض العادي
   settingMode = 0;
-  Serial.println("SettingMode reset to: " + String(settingMode));
-  
   lcd.clear();
   lcd.print("Ready...");
   delay(1000);
@@ -235,14 +216,16 @@ void setup() {
 void loop() {
   now = rtc.now();
 
-  // Read current button states once per loop
-  int modeState = digitalRead(BTN_MODE);
+  // Manual switch read at top of every loop — works in all modes
+  // INPUT_PULLUP: switch connects pin 14 to GND → LOW = manual ON
+  manualMode = (digitalRead(MANUAL_SWITCH_PIN) == LOW);
+
+  int modeState    = digitalRead(BTN_MODE);
   int sectionState = digitalRead(BTN_SECTION);
-  int upState = digitalRead(BTN_UP);
-  int downState = digitalRead(BTN_DOWN);
+  int upState      = digitalRead(BTN_UP);
+  int downState    = digitalRead(BTN_DOWN);
   unsigned long nowMs = millis();
 
-  // Debug: Print button states every 2 seconds
   static unsigned long lastDebugTime = 0;
   if (nowMs - lastDebugTime > 2000) {
     Serial.print("Button States - MODE:");
@@ -260,86 +243,69 @@ void loop() {
     lastDebugTime = nowMs;
   }
 
-  // Edge-detected press for MODE (HIGH -> LOW) - تفعيل/إلغاء وضع الضبط
+  // MODE button: enter / exit setting mode (HIGH → LOW)
   if (lastModeState == HIGH && modeState == LOW && (nowMs - lastButtonEventMs) > debounceMs) {
-    if (settingMode > 0) {
-      settingMode = 0;  // العودة للعرض العادي
-      Serial.println("MODE pressed - Return to normal display");
-    } else {
-      settingMode = 1;  // الدخول لوضع الضبط
-      Serial.println("MODE pressed - Enter setting mode");
-    }
+    settingMode = (settingMode > 0) ? 0 : 1;
+    Serial.println(settingMode ? "MODE - Enter setting" : "MODE - Normal display");
     lastButtonEventMs = nowMs;
   }
   lastModeState = modeState;
 
-  // Edge-detected press for SECTION (HIGH -> LOW) - اختيار ما نعدّل
+  // SECTION button: cycle setting field (HIGH → LOW)
   if (lastSectionState == HIGH && sectionState == LOW && (nowMs - lastButtonEventMs) > debounceMs) {
     if (settingMode > 0) {
-      settingMode++;
-      if (settingMode > 6) settingMode = 1;  // 1=ساعة، 2=دقيقة، 3=يوم، 4=شهر، 5=مدة الآذان (دقيقة)، 6=مدة الآذان (ثانية)
-      Serial.println("SECTION pressed - SettingMode: " + String(settingMode));
+      settingMode = (settingMode >= 6) ? 1 : settingMode + 1;
+      Serial.println("SECTION - SettingMode: " + String(settingMode));
     }
     lastButtonEventMs = nowMs;
   }
   lastSectionState = sectionState;
 
-  // لو كنا في وضع الضبط
   if (settingMode > 0) {
     Serial.println("DEBUG: In setting mode " + String(settingMode));
-    int y = now.year();
-    int m = now.month();
-    int d = now.day();
-    int h = now.hour();
+    int y  = now.year();
+    int m  = now.month();
+    int d  = now.day();
+    int h  = now.hour();
     int mn = now.minute();
-    int s = now.second();
+    int s  = now.second();
 
-    // ضبط القيم - زر UP
+    // UP button: increase selected value
     if (lastUpState == HIGH && upState == LOW && (nowMs - lastButtonEventMs) > debounceMs) {
-      if (settingMode == 1) h = (h + 1) % 24;      // ساعة
-      if (settingMode == 2) mn = (mn + 1) % 60;    // دقيقة
-      if (settingMode == 3) d = (d % 31) + 1;      // يوم (1-31)
-      if (settingMode == 4) m = (m % 12) + 1;      // شهر (1-12)
-      if (settingMode == 5) azanLenMinutes = (azanLenMinutes + 1) % 60; // مدة الآذان (دقيقة)
-      if (settingMode == 6) azanLenSeconds = (azanLenSeconds + 1) % 60; // مدة الآذان (ثانية)
-      if (settingMode >= 1 && settingMode <= 4) {
-        rtc.adjust(DateTime(y, m, d, h, mn, s));
-      }
-      if (settingMode == 5 || settingMode == 6) {
-        saveAzanLenToEEPROM();
-      }
+      if (settingMode == 1) h  = (h + 1) % 24;
+      if (settingMode == 2) mn = (mn + 1) % 60;
+      if (settingMode == 3) d  = (d % 31) + 1;
+      if (settingMode == 4) m  = (m % 12) + 1;
+      if (settingMode == 5) azanLenMinutes = (azanLenMinutes + 1) % 60;
+      if (settingMode == 6) azanLenSeconds = (azanLenSeconds + 1) % 60;
+      if (settingMode >= 1 && settingMode <= 4) rtc.adjust(DateTime(y, m, d, h, mn, s));
+      if (settingMode == 5 || settingMode == 6) saveAzanLenToEEPROM();
       lastButtonEventMs = nowMs;
-      Serial.println("UP pressed - Value increased");
+      Serial.println("UP pressed");
     }
 
-    // ضبط القيم - زر DOWN
+    // DOWN button: decrease selected value
     if (lastDownState == HIGH && downState == LOW && (nowMs - lastButtonEventMs) > debounceMs) {
-      if (settingMode == 1) h = (h - 1 + 24) % 24;     // ساعة
-      if (settingMode == 2) mn = (mn - 1 + 60) % 60;   // دقيقة
-      if (settingMode == 3) d = (d - 2 + 31) % 31 + 1; // يوم (1-31)
-      if (settingMode == 4) m = (m - 2 + 12) % 12 + 1; // شهر (1-12)
-      if (settingMode == 5) azanLenMinutes = (azanLenMinutes - 1 + 60) % 60; // مدة الآذان (دقيقة)
-      if (settingMode == 6) azanLenSeconds = (azanLenSeconds - 1 + 60) % 60; // مدة الآذان (ثانية)
-      if (settingMode >= 1 && settingMode <= 4) {
-        rtc.adjust(DateTime(y, m, d, h, mn, s));
-      }
-      if (settingMode == 5 || settingMode == 6) {
-        saveAzanLenToEEPROM();
-      }
+      if (settingMode == 1) h  = (h - 1 + 24) % 24;
+      if (settingMode == 2) mn = (mn - 1 + 60) % 60;
+      if (settingMode == 3) d  = (d - 2 + 31) % 31 + 1;
+      if (settingMode == 4) m  = (m - 2 + 12) % 12 + 1;
+      if (settingMode == 5) azanLenMinutes = (azanLenMinutes - 1 + 60) % 60;
+      if (settingMode == 6) azanLenSeconds = (azanLenSeconds - 1 + 60) % 60;
+      if (settingMode >= 1 && settingMode <= 4) rtc.adjust(DateTime(y, m, d, h, mn, s));
+      if (settingMode == 5 || settingMode == 6) saveAzanLenToEEPROM();
       lastButtonEventMs = nowMs;
-      Serial.println("DOWN pressed - Value decreased");
+      Serial.println("DOWN pressed");
     }
 
-    // Update last states after handling edges
-    lastUpState = upState;
+    lastUpState   = upState;
     lastDownState = downState;
 
-    // عرض الوضع الحالي على LCD
     lcd.setCursor(0, 0);
     char timeLine[17];
     snprintf(timeLine, sizeof(timeLine), "%02d/%02d %02d:%02d:%02d", d, m, h, mn, s);
     lcd.print(timeLine);
-    
+
     lcd.setCursor(0, 1);
     if (settingMode == 1) lcd.print("Set Hour       ");
     if (settingMode == 2) lcd.print("Set Minute     ");
@@ -357,58 +323,30 @@ void loop() {
     }
 
   } else {
-    // وضع العرض العادي (الكود الموجود عندك)
     Serial.println("DEBUG: In normal display mode");
-    // قراءة وضع التشغيل اليدوي من المفتاح (HIGH=تشغيل يدوي)
-    manualMode = (digitalRead(MANUAL_SWITCH_PIN) == HIGH);
-    // Get current time with error handling
-    DateTime now;
-    bool timeValid = false;
 
-    // Read time (exceptions are disabled on AVR; rtc.now() does not throw)
-    now = rtc.now();
-    timeValid = true;
+    lastDownState = downState;
+    lastUpState   = upState;
 
-    if (!timeValid) {
-      Serial.println("Error reading RTC time!");
-      lcd.clear();
-      lcd.print("RTC Error!");
-      lcd.setCursor(0, 1);
-      lcd.print("Reconnecting...");
-      delay(2000);
-
-      // Try to reconnect
-      if (rtc.begin()) {
-        Serial.println("RTC reconnected!");
-        lcd.clear();
-        lcd.print("RTC Reconnected!");
-        delay(1000);
-      }
-      return;
-    }
-
-    // Display time on LCD
     char line1[17];
     snprintf(line1, sizeof(line1), "%02d/%02d %02d:%02d:%02d",
              now.day(), now.month(), now.hour(), now.minute(), now.second());
 
     lcd.setCursor(0, 0);
-    lcd.print("                ");  // Clear line
+    lcd.print("                ");
     lcd.setCursor(0, 0);
     lcd.print(line1);
 
-    // Print to Serial
     Serial.print("Time: ");
     Serial.println(line1);
 
-    // Check prayer time and control azan based on daily table
     const char* currentPrayer = "";
     bool prayerTimeNow = false;
 
     const PrayerTime* today = getPrayerTimesForDate(now.day(), now.month());
     if (today != NULL) {
-      int hours[5] = { today->fajr_hour, today->dhuhr_hour, today->asr_hour, today->maghrib_hour, today->isha_hour };
-      int minutes[5] = { today->fajr_min, today->dhuhr_min, today->asr_min, today->maghrib_min, today->isha_min };
+      int hours[5]   = { today->fajr_hour,  today->dhuhr_hour,  today->asr_hour,  today->maghrib_hour,  today->isha_hour  };
+      int minutes[5] = { today->fajr_min,   today->dhuhr_min,   today->asr_min,   today->maghrib_min,   today->isha_min   };
       for (int i = 0; i < 5; i++) {
         if (now.hour() == hours[i] && now.minute() == minutes[i]) {
           currentPrayer = PRAYER_NAMES[i];
@@ -417,40 +355,34 @@ void loop() {
         }
       }
     } else {
-      // لا توجد بيانات لهذا اليوم في الجدول
       Serial.println("No prayer times found for today!");
     }
 
-    // إذا حان وقت الصلاة ولم يكن الآذان نشط
     if (prayerTimeNow && !azanActive) {
       azanActive = true;
       azanStartTime = millis();
-      currentAzanName = String(currentPrayer); // حفظ اسم الآذان
-      digitalWrite(RELAY_PIN, LOW); // تشغيل الريليه
+      currentAzanName = String(currentPrayer);
+      digitalWrite(RELAY_PIN, LOW);
       Serial.println("AZAN TIME: " + currentAzanName);
     }
 
-    // إذا كان الآذان نشط وانتهت المدة المحددة
     if (azanActive && (millis() - azanStartTime >= getAzanDurationMs())) {
       azanActive = false;
-      currentAzanName = ""; // مسح اسم الآذان
-      digitalWrite(RELAY_PIN, HIGH); // إيقاف الريليه
+      currentAzanName = "";
+      digitalWrite(RELAY_PIN, HIGH);
       Serial.println("AZAN FINISHED");
     }
 
-    // Display status on second line
     lcd.setCursor(0, 1);
-    lcd.print("                ");  // Clear line
+    lcd.print("                ");
     lcd.setCursor(0, 1);
     if (manualMode) {
       lcd.print("MANUAL ON       ");
+    } else if (azanActive) {
+      lcd.print("AZAN: ");
+      lcd.print(currentAzanName);
     } else {
-      if (azanActive) {
-        lcd.print("AZAN: ");
-        lcd.print(currentAzanName);
-      } else {
-        lcd.print(currentPrayer);
-      }
+      lcd.print(currentPrayer);
     }
 
     Serial.print("Current Prayer: ");
@@ -464,8 +396,8 @@ void loop() {
 
     delay(1000);
   }
-  
-  // تأكيد حالة الريليه حسب أولوية التشغيل اليدوي ثم نمط الآذان (Active-Low): تشغيل=LOW، إيقاف=HIGH
+
+  // Relay reassertion — manual switch wins over azan (active-low: LOW = ON)
   if (manualMode) {
     digitalWrite(RELAY_PIN, LOW);
   } else {

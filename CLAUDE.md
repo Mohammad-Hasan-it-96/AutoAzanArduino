@@ -21,6 +21,10 @@ There is no build system in the repo — this is built and uploaded with the Ard
   Azan start/stop here every loop, which is the primary debugging channel.
 - `arduino-cli` example: `arduino-cli compile --fqbn <board> .` then `arduino-cli upload -p <port> --fqbn <board> .`
 
+On boot, `setup()` runs an I2C bus scan (`scanI2C()`) and then retries `rtc.begin()` up to 3
+times. If the RTC is not found after 3 attempts, the sketch halts in an infinite loop displaying
+"RTC Failed! / Check Wiring!" on the LCD — it will never reach `loop()`.
+
 ## Regenerating the prayer table
 
 `prayer_times.h` is generated data — `manual_prayer_times.py` (Python 3, stdlib only, no deps)
@@ -35,24 +39,32 @@ the sketch expects.
 - The interactive flow is tedious by design (a `Press Enter` between every day). For bulk/scripted
   generation, prefer editing the data path: the writer is `write_header()` and the per-day data
   comes from the `entries` list built in `main()`. Ctrl-C aborts cleanly.
+- `manual_prayer_times.h` is a previously-generated output (real data) that lives alongside
+  `prayer_times.h`. Both use `#ifndef PRAYER_TIMES_H` / `#define PRAYER_TIMES_H` — **they share
+  the same header guard and cannot both be included**. Only `prayer_times.h` is `#include`d in
+  `Azan.ino`. `manual_prayer_times.h` is kept as a reference/backup only.
 
 ## Target board caveat (important)
 
 The code is internally inconsistent about the target and this matters before changing pins:
 - It defines ESP32-style I2C pins (`I2C_SDA 21`, `I2C_SCL 22`) and calls `Wire.setClock` /
   `Wire.setTimeout`, but `Wire.begin()` in `setup()` is called **without** the SDA/SCL args, so
-  those `#define`s are currently unused.
+  those `#define`s are currently unused. On an Uno/Nano the actual I2C pins are **A4 (SDA) and
+  A5 (SCL)** — the hardware I2C bus; those cannot be moved.
 - Comments and `EEPROM.read/write` (no `EEPROM.commit`) assume an **AVR** board (e.g. Uno/Mega),
   where EEPROM is real and exceptions are disabled.
 - Button pins 10–13 and LCD pins 4–9 are AVR/Uno-style assignments.
+- The manual switch (`MANUAL_SWITCH_PIN 14` = A0) is `INPUT` with **no pull-up**. An external
+  **10 kΩ pull-down resistor** to GND is required on that pin to prevent it from floating when
+  the switch is open (see `wiring.md`).
 
 Before retargeting or relying on a pin, confirm the actual board: if it is an ESP32, EEPROM
-writes need `EEPROM.begin(size)` + `EEPROM.commit()`, and pins 10–14 may not exist/behave the
-same. Treat the current pin map as Uno-oriented unless the user says otherwise.
+writes need `EEPROM.begin(size)` + `EEPROM.commit()`, and `Wire.begin(I2C_SDA, I2C_SCL)` must
+be used. Treat the current pin map as Uno-oriented unless the user says otherwise.
 
 ## Architecture
 
-Three files:
+Four files:
 
 - **`Azan.ino`** — all firmware logic. Standard Arduino `setup()`/`loop()`.
 - **`prayer_times.h`** — a `const PrayerTime prayer_times[365]` lookup table, one row per
@@ -61,6 +73,8 @@ Three files:
   see "Regenerating the prayer table".
 - **`manual_prayer_times.py`** — host-side Python generator for `prayer_times.h`. Not compiled
   into the firmware; runs on a PC.
+- **`wiring.md`** — complete hardware pin map with wiring tables for every module (RTC, LCD,
+  relay, buttons, manual switch). Consult this before changing or adding any hardware connections.
 
 Key flow in `loop()`:
 1. Read RTC and all four button states once per iteration.
@@ -93,3 +107,9 @@ Relay logic is **active-low**: `LOW` = on, `HIGH` = off.
   `NULL` on a leap day and no Azan fires.
 - Prayer matching is exact-minute; if the device misses that minute (e.g. mid-setting), the Azan
   for that prayer won't trigger.
+- Inside the `else` branch of `loop()` (normal display mode), a **local `DateTime now`** is
+  declared that shadows the global `DateTime now` at the top of the file. Both hold the same
+  value, but be careful not to rely on the global after this point inside that branch.
+- The `timeValid` / `if (!timeValid)` reconnect block in the same else branch is **dead code**:
+  `timeValid` is unconditionally set `true` immediately after `rtc.now()` (AVR has no exceptions
+  and `rtc.now()` never throws). The reconnect path will never execute.
