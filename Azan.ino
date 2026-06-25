@@ -138,7 +138,7 @@ void setup() {
   pinMode(RELAY_PIN, OUTPUT);
   // Manual switch: INPUT_PULLUP — connect switch between pin 14 and GND; LOW = manual ON
   pinMode(MANUAL_SWITCH_PIN, INPUT_PULLUP);
-  digitalWrite(RELAY_PIN, HIGH);  // relay off at startup
+  digitalWrite(RELAY_PIN, LOW);   // MOSFET off at startup (active-high: HIGH = on)
 
   Wire.begin();
   Wire.setClock(I2C_FREQ);
@@ -362,14 +362,14 @@ void loop() {
       azanActive = true;
       azanStartTime = millis();
       currentAzanName = String(currentPrayer);
-      digitalWrite(RELAY_PIN, LOW);
+      digitalWrite(RELAY_PIN, HIGH);  // MOSFET on — amplifier powered
       Serial.println("AZAN TIME: " + currentAzanName);
     }
 
     if (azanActive && (millis() - azanStartTime >= getAzanDurationMs())) {
       azanActive = false;
       currentAzanName = "";
-      digitalWrite(RELAY_PIN, HIGH);
+      digitalWrite(RELAY_PIN, LOW);   // MOSFET off — amplifier off
       Serial.println("AZAN FINISHED");
     }
 
@@ -397,10 +397,10 @@ void loop() {
     delay(1000);
   }
 
-  // Relay reassertion — manual switch wins over azan (active-low: LOW = ON)
+  // MOSFET reassertion — manual switch wins over azan (active-high: HIGH = on)
   if (manualMode) {
-    digitalWrite(RELAY_PIN, LOW);
+    digitalWrite(RELAY_PIN, HIGH);
   } else {
-    digitalWrite(RELAY_PIN, azanActive ? LOW : HIGH);
+    digitalWrite(RELAY_PIN, azanActive ? HIGH : LOW);
   }
 }
