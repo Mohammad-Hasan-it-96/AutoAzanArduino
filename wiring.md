@@ -26,7 +26,7 @@ connects to. The pin assignments are taken directly from `Azan.ino`.
 |                           | D6          | 6                | OUTPUT                 |
 |                           | D7          | 7                | OUTPUT                 |
 | **MOSFET (Azan output)**  | Gate (IN)   | 3                | OUTPUT (active-HIGH)   |
-| **SD card module**        | CS          | 10               | OUTPUT                 |
+| **SD card module**        | CS          | **53**           | OUTPUT (hardware SS)   |
 |                           | MOSI        | **51**           | Hardware SPI           |
 |                           | MISO        | **50**           | Hardware SPI           |
 |                           | SCK         | **52**           | Hardware SPI           |
@@ -36,7 +36,7 @@ connects to. The pin assignments are taken directly from `Azan.ino`.
 | **Button: SECTION**       | signal      | A1 (pin 55)      | INPUT_PULLUP           |
 | **Button: UP**            | signal      | A2 (pin 56)      | INPUT_PULLUP           |
 | **Button: DOWN**          | signal      | A3 (pin 57)      | INPUT_PULLUP           |
-| **Manual switch**         | signal      | A0 (pin 54)      | INPUT_PULLUP, active-LOW |
+| **Manual switch**         | signal      | **14** (TX3)     | INPUT_PULLUP, active-LOW |
 | **Reset button**          | —           | RST pin → GND    | Hardware reset, no firmware needed |
 
 ---
@@ -95,7 +95,7 @@ Wiring to the wrong pins is the most common cause of `SD: No card or wiring erro
 
 | SD module pin | Arduino Mega pin | Notes                                    |
 |---------------|------------------|------------------------------------------|
-| CS (SS)       | **10**           | Set as OUTPUT by firmware                |
+| CS (SS)       | **53**           | Mega hardware SS — set as OUTPUT         |
 | MOSI          | **51**           | Hardware SPI — must use this pin         |
 | MISO          | **50**           | Hardware SPI — must use this pin         |
 | SCK (CLK)     | **52**           | Hardware SPI — must use this pin         |
@@ -103,8 +103,7 @@ Wiring to the wrong pins is the most common cause of `SD: No card or wiring erro
 | GND           | GND              |                                          |
 
 Notes:
-- SD module CS is on pin **10** (a regular digital output). Pin 53 (Mega's hardware SS) is
-  internally managed by the SPI library and does not need to be connected to the module.
+- SD module CS is on pin **53** (Mega's hardware SS pin). `SD_CS_PIN 53` is defined in firmware.
 - Most SD modules have an onboard 3.3 V regulator and level shifter — connect VCC to 5 V.
   If your module has no regulator (bare breakout), use the 3.3 V pin instead.
 - The SD card must be formatted as **FAT32** (not exFAT). Use SD Card Formatter or Windows
@@ -154,19 +153,23 @@ Arduino pin ──┤ push-button ├── GND
 ## 6. Manual override switch
 
 Forces the amplifier ON regardless of prayer schedule. Uses `INPUT_PULLUP` — connect the
-switch between **A0 and GND**. No external resistor needed.
+switch between **pin 14 and GND**. No external resistor needed.
 
-| Switch terminal | Connect to              |
-|-----------------|-------------------------|
-| One side        | Arduino pin **A0** (54) |
-| Other side      | GND                     |
+| Switch terminal | Connect to               |
+|-----------------|--------------------------|
+| One side        | Arduino pin **14** (TX3) |
+| Other side      | GND                      |
 
 - Switch open (idle) → pin reads HIGH → manual mode OFF.
 - Switch closed → pin pulled LOW → manual mode ON → MOSFET driven HIGH.
 
 ```
-Arduino A0 ──┤ switch ├── GND
+Arduino pin 14 ──┤ switch ├── GND
 ```
+
+> **Note:** On Mega, digital pin 14 is TX3 (USART3 transmit). This pin is safe to use as
+> a digital input when USART3 is not in use (the sketch only uses `Serial` on USART0).
+> If you ever need USART3, move the switch to a free digital pin and update `MANUAL_SWITCH_PIN`.
 
 ---
 
