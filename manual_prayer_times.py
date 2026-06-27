@@ -37,6 +37,16 @@ def build_dates_for_year(year: int) -> List[Tuple[int, int]]:
     return dates
 
 
+def write_csv(filename: str, entries: List[Tuple[int, int, int, int, int, int, int, int, int, int]]):
+    """Write PTIMES.CSV for SD-card use by the Arduino.
+    Format: day,month,fajr_h,fajr_m,dhuhr_h,dhuhr_m,asr_h,asr_m,maghrib_h,maghrib_m,isha_h,isha_m
+    No header row — one line per day, 365 lines total.
+    """
+    with open(filename, "w", encoding="utf-8", newline="\n") as f:
+        for (day, month, fh, fm, dh, dm, ah, am, mh, mm, ih, im) in entries:
+            f.write(f"{day},{month},{fh},{fm},{dh},{dm},{ah},{am},{mh},{mm},{ih},{im}\n")
+
+
 def write_header(filename: str, entries: List[Tuple[int, int, int, int, int, int, int, int, int, int]]):
     """Write the .h file with the same structure/signature as prayer_times.h."""
     # entries: (day, month, fajr_h, fajr_m, dhuhr_h, dhuhr_m, asr_h, asr_m, maghrib_h, maghrib_m, isha_h, isha_m)
@@ -118,9 +128,14 @@ def main():
         input("  Press Enter to continue to next day...")
         print()
 
-    print("Writing header file...\n")
+    print("Writing files...\n")
     write_header(output_filename, entries)
-    print(f"Done. Generated {output_filename}")
+    print(f"  Generated {output_filename}  (Arduino firmware fallback)")
+
+    csv_filename = "PTIMES.CSV"
+    write_csv(csv_filename, entries)
+    print(f"  Generated {csv_filename}      (copy this file to the SD card)")
+    print("\nDone.")
 
 
 if __name__ == "__main__":

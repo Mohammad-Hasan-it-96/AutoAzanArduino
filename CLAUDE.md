@@ -5,111 +5,117 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 An Arduino sketch that drives a prayer-call (Azan) clock. It reads the date/time from a
-DS3231 RTC, looks up the five daily prayer times from a hard-coded yearly table, and pulls a
-relay LOW (active-low) for a configurable duration when a prayer time is reached. A 16x2
-parallel LCD shows the clock and status; four buttons let the user set the time/date and the
-Azan duration, which persists in EEPROM. A physical switch forces the relay on (manual mode).
+DS3231 RTC, looks up the five daily prayer times from a hard-coded yearly table, and drives an
+N-channel MOSFET HIGH for a configurable duration when a prayer time is reached (powering an
+amplifier). A 16x2 parallel LCD shows the clock and status; four buttons let the user set the
+time/date and Azan duration, which persists in EEPROM. A physical switch forces the output on
+(manual mode). A hardware reset button connects directly to the RST pin — no firmware needed.
 
 ## Build / flash / debug
 
-There is no build system in the repo — this is built and uploaded with the Arduino IDE (or
-`arduino-cli`). There are no tests.
+There is no build system — built and uploaded with the Arduino IDE (or `arduino-cli`). No tests.
 
 - Open `Azan.ino` in the Arduino IDE; `prayer_times.h` is included automatically (same folder).
 - Required libraries: `RTClib` (Adafruit), plus the bundled `Wire`, `LiquidCrystal`, `EEPROM`.
-- Serial monitor runs at **9600 baud** — the sketch logs button states, prayer detection, and
-  Azan start/stop here every loop, which is the primary debugging channel.
-- `arduino-cli` example: `arduino-cli compile --fqbn <board> .` then `arduino-cli upload -p <port> --fqbn <board> .`
+- Serial monitor runs at **9600 baud** — logs button states, prayer detection, and Azan
+  start/stop every loop. This is the primary debugging channel.
+- `arduino-cli` example: `arduino-cli compile --fqbn <board> .` then
+  `arduino-cli upload -p <port> --fqbn <board> .`
 
-On boot, `setup()` runs an I2C bus scan (`scanI2C()`) and then retries `rtc.begin()` up to 3
-times. If the RTC is not found after 3 attempts, the sketch halts in an infinite loop displaying
-"RTC Failed! / Check Wiring!" on the LCD — it will never reach `loop()`.
+On boot, `setup()` runs an I2C bus scan (`scanI2C()`) and retries `rtc.begin()` up to 3 times.
+If the RTC is not found, the sketch halts forever displaying "RTC Failed! / Check Wiring!" —
+it will never reach `loop()`.
 
 ## Regenerating the prayer table
 
 `prayer_times.h` is generated data — `manual_prayer_times.py` (Python 3, stdlib only, no deps)
-produces it. Run with `python manual_prayer_times.py` for an interactive prompt that walks all
-365 days, asking for each of the five prayers' hour/minute, and writes a `.h` file
-(default `prayer_times.h`) with the exact same `PrayerTime` struct and `prayer_times[365]` layout
+produces it. Run `python manual_prayer_times.py` for an interactive prompt that walks all 365
+days and writes a `.h` file with the exact `PrayerTime` struct and `prayer_times[365]` layout
 the sketch expects.
 
-- It always emits **365 days** (non-leap, fixed `DAYS_IN_MONTH`) to match the firmware's table
-  size — keep the struct/array shape in `prayer_times.h` and the generator in sync if either
-  changes (the `.ino` reads these field names directly).
-- The interactive flow is tedious by design (a `Press Enter` between every day). For bulk/scripted
-  generation, prefer editing the data path: the writer is `write_header()` and the per-day data
-  comes from the `entries` list built in `main()`. Ctrl-C aborts cleanly.
-- `manual_prayer_times.h` is a previously-generated output (real data) that lives alongside
-  `prayer_times.h`. Both use `#ifndef PRAYER_TIMES_H` / `#define PRAYER_TIMES_H` — **they share
-  the same header guard and cannot both be included**. Only `prayer_times.h` is `#include`d in
-  `Azan.ino`. `manual_prayer_times.h` is kept as a reference/backup only.
+- Always emits **365 days** (non-leap, fixed `DAYS_IN_MONTH`) — keep the struct/array shape in
+  sync between `prayer_times.h` and the generator if either changes.
+- For bulk/scripted generation, edit the data path directly: the writer is `write_header()` and
+  per-day data comes from the `entries` list in `main()`. Ctrl-C aborts cleanly.
+- `manual_prayer_times.h` is a previously-generated output kept as a reference. Both files use
+  `#ifndef PRAYER_TIMES_H` — **they share the same header guard and cannot both be included**.
+  Only `prayer_times.h` is `#include`d in `Azan.ino`.
 
 ## Target board caveat (important)
 
-The code is internally inconsistent about the target and this matters before changing pins:
-- It defines ESP32-style I2C pins (`I2C_SDA 21`, `I2C_SCL 22`) and calls `Wire.setClock` /
-  `Wire.setTimeout`, but `Wire.begin()` in `setup()` is called **without** the SDA/SCL args, so
-  those `#define`s are currently unused. On an Uno/Nano the actual I2C pins are **A4 (SDA) and
-  A5 (SCL)** — the hardware I2C bus; those cannot be moved.
-- Comments and `EEPROM.read/write` (no `EEPROM.commit`) assume an **AVR** board (e.g. Uno/Mega),
-  where EEPROM is real and exceptions are disabled.
-- Button pins 10–13 and LCD pins 4–9 are AVR/Uno-style assignments.
-- The manual switch (`MANUAL_SWITCH_PIN 14` = A0) is `INPUT` with **no pull-up**. An external
-  **10 kΩ pull-down resistor** to GND is required on that pin to prevent it from floating when
-  the switch is open (see `wiring.md`).
+The code is internally inconsistent about the target — confirm the board before changing pins:
 
-Before retargeting or relying on a pin, confirm the actual board: if it is an ESP32, EEPROM
-writes need `EEPROM.begin(size)` + `EEPROM.commit()`, and `Wire.begin(I2C_SDA, I2C_SCL)` must
-be used. Treat the current pin map as Uno-oriented unless the user says otherwise.
+- Defines ESP32-style I2C pins (`I2C_SDA 21`, `I2C_SCL 22`) but calls `Wire.begin()` **without**
+  those args, so they are unused. On Uno/Nano the actual I2C pins are **A4 (SDA) / A5 (SCL)**.
+- `EEPROM.read/write` (no `EEPROM.commit`) assumes **AVR**. On ESP32, add `EEPROM.begin(size)`
+  and `EEPROM.commit()` after every write, and pass SDA/SCL to `Wire.begin()`.
+- Button pins 10–13 and LCD pins 4–9 are AVR/Uno-style. Treat the pin map as Uno-oriented
+  unless told otherwise.
 
 ## Architecture
 
-Four files:
+Key files:
 
 - **`Azan.ino`** — all firmware logic. Standard Arduino `setup()`/`loop()`.
-- **`prayer_times.h`** — a `const PrayerTime prayer_times[365]` lookup table, one row per
-  calendar day, keyed by `{day, month}` with hour/min fields for each of the five prayers.
-  This is the data source; editing prayer schedules means editing this array. **Generated** —
-  see "Regenerating the prayer table".
-- **`manual_prayer_times.py`** — host-side Python generator for `prayer_times.h`. Not compiled
-  into the firmware; runs on a PC.
-- **`wiring.md`** — complete hardware pin map with wiring tables for every module (RTC, LCD,
-  relay, buttons, manual switch). Consult this before changing or adding any hardware connections.
+- **`prayer_times.h`** — `const PrayerTime prayer_times[365]` lookup table, one row per
+  calendar day keyed by `{day, month}`, with hour/min for each of the five prayers. Editing
+  prayer schedules means editing this array. Generated — see above.
+- **`manual_prayer_times.py`** — host-side generator for `prayer_times.h`. Runs on a PC, not
+  compiled into firmware.
+- **`wiring.md`** — complete hardware pin map for all modules. **Note:** `wiring.md` was written
+  when the output device was a relay; the output is now a MOSFET (see Output logic below).
 
 Key flow in `loop()`:
-1. Read RTC and all four button states once per iteration.
-2. **Setting mode** (`settingMode != 0`): MODE button toggles in/out; SECTION button cycles
-   `settingMode` 1→6 (1=hour, 2=minute, 3=day, 4=month, 5=Azan minutes, 6=Azan seconds);
-   UP/DOWN adjust. Modes 1–4 write back to the RTC via `rtc.adjust(...)`; modes 5–6 persist via
-   `saveAzanLenToEEPROM()`.
-3. **Normal display mode** (`settingMode == 0`): look up today's row with
-   `getPrayerTimesForDate(day, month)` (linear scan of the table). If current hour:minute exactly
-   matches a prayer, set `azanActive` and pull the relay LOW; clear it after
-   `getAzanDurationMs()` elapses (uses `millis()`, not the RTC, for duration).
-4. After the branch, the relay is reasserted: **manual switch (HIGH) wins** over Azan state.
 
-Relay logic is **active-low**: `LOW` = on, `HIGH` = off.
+1. Read RTC into global `now` and read manual switch — both happen at the very top, before the
+   if/else, so they are current in all modes.
+2. Process MODE and SECTION button edges (shared across both modes).
+3. **Setting mode** (`settingMode != 0`): SECTION cycles `settingMode` 1→6
+   (1=hour, 2=minute, 3=day, 4=month, 5=Azan minutes, 6=Azan seconds); UP increases,
+   DOWN decreases. Modes 1–4 write to the RTC via `rtc.adjust()`; modes 5–6 persist via
+   `saveAzanLenToEEPROM()`.
+4. **Normal display mode** (`settingMode == 0`): `getPrayerTimesForDate(day, month)` does a
+   linear scan of the 365-row table. If the current hour:minute exactly matches a prayer, sets
+   `azanActive` and drives the MOSFET HIGH. Clears after `getAzanDurationMs()` elapses
+   (tracked with `millis()`, not the RTC).
+5. After the if/else: MOSFET is reasserted — **manual switch wins** over Azan state.
+
+### Output logic — MOSFET active-HIGH
+
+The sketch drives pin 3 (`RELAY_PIN`, kept as the name in code) to an N-channel MOSFET gate:
+
+- `HIGH` = MOSFET ON = amplifier powered
+- `LOW`  = MOSFET OFF = amplifier off
+
+**If the MOSFET module has a built-in inverter/optocoupler** (some boards are active-low like
+relay modules), all five `digitalWrite(RELAY_PIN, ...)` calls must be flipped.
+
+### Manual switch
+
+`MANUAL_SWITCH_PIN` (pin 14 = A0) is `INPUT_PULLUP`. Wire the switch between **pin 14 and GND**
+— pressing/closing pulls the pin LOW → `manualMode = true` → MOSFET driven HIGH regardless of
+prayer schedule. No external resistor needed. The switch state is read at the top of every
+`loop()` iteration so it works in both normal and setting modes.
 
 ### State & persistence
-- Global flags drive everything: `settingMode`, `azanActive`, `azanStartTime`,
-  `currentAzanName`, `manualMode`.
-- Azan duration (`azanLenMinutes`, `azanLenSeconds`) lives in EEPROM at addresses 0/1/2
-  (0 = init flag, 1 = minutes, 2 = seconds). `loadAzanLenFromEEPROM()` seeds defaults of 5:00
-  on first boot.
-- Buttons use edge-detected debouncing: compare against `lastXxxState` with a `debounceMs` (120ms)
-  guard on `lastButtonEventMs`. MODE is wired active-high-idle in code (`INPUT_PULLUP`, edge
-  HIGH→LOW); preserve this pattern when adding buttons.
 
-### Notable conventions / gotchas
-- Comments and LCD/Serial strings mix Arabic and English; keep new user-facing strings short
-  (LCD is 16 chars wide — lines are space-padded to clear) and follow the existing bilingual style.
-- The table only covers 365 rows — **Feb 29 has no entry**, so `getPrayerTimesForDate` returns
+- Globals: `settingMode`, `azanActive`, `azanStartTime`, `currentAzanName`, `manualMode`.
+- Azan duration lives in EEPROM at addresses 0/1/2 (0 = init flag, 1 = minutes, 2 = seconds).
+  `loadAzanLenFromEEPROM()` seeds defaults of 5:00 on first boot.
+- All five buttons (MODE, SECTION, UP, DOWN, and any future additions) use `INPUT_PULLUP` with
+  edge-detected debouncing: HIGH→LOW edge, 120 ms guard on shared `lastButtonEventMs`.
+  `lastUpState`/`lastDownState` are updated inside each branch (setting/normal) separately.
+
+### Notable gotchas
+
+- The table covers 365 rows only — **Feb 29 has no entry**, so `getPrayerTimesForDate` returns
   `NULL` on a leap day and no Azan fires.
-- Prayer matching is exact-minute; if the device misses that minute (e.g. mid-setting), the Azan
-  for that prayer won't trigger.
-- Inside the `else` branch of `loop()` (normal display mode), a **local `DateTime now`** is
-  declared that shadows the global `DateTime now` at the top of the file. Both hold the same
-  value, but be careful not to rely on the global after this point inside that branch.
-- The `timeValid` / `if (!timeValid)` reconnect block in the same else branch is **dead code**:
-  `timeValid` is unconditionally set `true` immediately after `rtc.now()` (AVR has no exceptions
-  and `rtc.now()` never throws). The reconnect path will never execute.
+- Prayer matching is exact-minute. If the device is mid-boot or in setting mode when a prayer
+  minute passes, that Azan is missed (no catch-up logic).
+- If `azanLenMinutes` and `azanLenSeconds` are both 0 (e.g. EEPROM corrupted to 0:0), the
+  duration check `millis() - azanStartTime >= 0` is immediately true on the same loop tick that
+  sets `azanActive`, so the Azan fires and ends within one iteration.
+- `RELAY_PIN` is the pin name in the code even though the device is now a MOSFET — do not
+  confuse the name with the (old) active-low relay logic documented in `wiring.md`.
+- LCD strings mix Arabic and English; keep new user-facing strings ≤16 chars and space-pad to
+  16 to clear leftover characters (the code clears lines by printing 16 spaces before writing).
